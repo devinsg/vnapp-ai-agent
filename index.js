@@ -13,10 +13,10 @@ app.set('port', process.env.PORT || 5001);
 app.set('host', process.env.HOST || 'localhost');
 app.set('secretKey', process.env.SECRET_KEY || 'vnapp-ai');
 
-// Khởi tạo SDK Gemini chính thức (Sử dụng API key miễn phí từ Google AI Studio)
-// Lấy key tại: https://aistudio.google.com/
+// Khởi tạo SDK Gemini chính thức
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-const GEMINI_MODEL = 'gemini-3.8-flash';
+const GEMINI_MODEL = 'gemini-3.1-flash-lite';
+// gemini-3.5-flash-lite | gemini-3.1-flash-lite | gemini-3.6-flash  | gemini-3.8-flash
 
 // ==========================================
 // 1. ĐỊNH NGHĨA CÔNG CỤ (TOOLS) CHO AGENT
@@ -35,17 +35,16 @@ const queryAttendanceTool = {
 
 // Hàm thực thi thực tế của Tool
 function executeAttendanceQuery(employeeName) {
-  // Giả lập kết quả trả về từ cơ sở dữ liệu SQL Server
   console.log(`[SQL Tool Executed] Đang query dữ liệu cho: ${employeeName}`);
-  return JSON.stringify({
+  return {
     employee: employeeName,
     month: "11/2026",
     workDays: 22,
     status: "Đầy đủ, không đi muộn"
-  });
+  };
 }
 
-// Gom các tools vào danh sách
+// Gom các tools vào danh sách cấu hình
 const tools = [{ functionDeclarations: [queryAttendanceTool] }];
 
 // ==========================================
@@ -55,44 +54,47 @@ app.post('/api/chat', async (req, res) => {
     try {
         const { prompt } = req.body;
 
-        // Gọi Gemini Flash (Model tối ưu, nhanh và miễn phí cho dev)
-        const response = await ai.models.generateContent({
-        model: GEMINI_MODEL,
-        contents: prompt,
-        config: {
+        // Khởi tạo một phiên Chat Session (giúp SDK tự quản lý state và thought_signature)
+        const chat = ai.chats.create({
+          model: GEMINI_MODEL,
+          config: {
             tools: tools,
+            thinkingConfig: {
+              thinkingBudget: 0,
+            },
             systemInstruction: "Bạn là trợ lý AI nhân sự. Hãy phân tích câu hỏi và gọi tool tương ứng nếu cần thiết.",
-        }
+          }
         });
 
+        // Gửi tin nhắn đầu tiên từ user vào phiên chat
+        let response = await chat.sendMessage({ message: prompt });
+
         // Kiểm tra xem Agent có muốn gọi Tool hay không
-        const functionCalls = response.functionCalls;
-        
-        if (functionCalls && functionCalls.length > 0) {
-          const call = functionCalls[0];
+        if (response.functionCalls && response.functionCalls.length > 0) {
+          const call = response.functionCalls[0];
           let toolResult = "";
 
           // Nếu Agent gọi đúng tool queryAttendance
           if (call.name === "queryAttendance") {
               const args = call.args;
+              console.log('args:', args);
               toolResult = executeAttendanceQuery(args.employeeName);
           }
 
-          // Gửi kết quả từ Tool ngược lại cho Gemini để nó tổng hợp thành câu trả lời hoàn chỉnh
-          const finalResponse = await ai.models.generateContent({
-              model: GEMINI_MODEL,
-              contents: [
-              { role: 'user', parts: [{ text: prompt }] },
-              { role: 'model', parts: [{ functionCall: call }] },
-              { role: 'function', parts: [{ functionResponse: { name: call.name, response: { result: toolResult } } }] }
-              ]
+          // Gửi kết quả thực thi từ Tool ngược lại vào chat session
+          // SDK sẽ tự động đính kèm thought_signature và gọi tiếp Gemini để tổng hợp câu trả lời
+          response = await chat.sendMessage({
+            message: [{
+              functionResponse: {
+                name: call.name,
+                response: { result: toolResult }
+              }
+            }]
           });
+        }
 
-          return res.json({ reply: finalResponse.text });
-        };
-
-        // Trường hợp câu hỏi thông thường không cần gọi tool
-        res.json({ reply: response.text });
+        // Trả kết quả cuối cùng về cho Client
+        return res.json({ reply: response.text });
 
     } catch (error) {
         console.error("Lỗi:", error);
@@ -110,5 +112,5 @@ app.get('/api/status', function (req, res) {
 const PORT = app.get('port');
 const HOST = app.get('host');
 app.listen(PORT, () => {
-  console.log(`Backend Agent đang chạy tại ${HOST} cổng ${PORT}`);
+  console.log(`Backend Agent đang chạy tại http://${HOST}:${PORT}`);
 });
