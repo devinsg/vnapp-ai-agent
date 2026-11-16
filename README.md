@@ -12,4 +12,5 @@
 
 ### Sử dụng Cline + Free API Key (Gemini) trong VS Code
 - Install extension Cline
+- https://aistudio.google.com/
 - Free API Key | ABCD
