@@ -9,3 +9,7 @@
 ### Necessary Library
 - npm init -y
 - npm i express cors dotenv @google/genai
+
+### Sử dụng Cline + Free API Key (Gemini) trong VS Code
+- Install extension Cline
+- Free API Key | ABCD
